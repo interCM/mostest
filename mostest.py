@@ -8,7 +8,7 @@ import argparse
 
 
 example_text =  """Example:
-python mostest.py --bfile chr21 --pheno pheno.txt --out test.npz"""
+python mostest.py --bfile chr21 --pheno pheno.txt --out test"""
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description="Produce mostest and minp statistics.", epilog=example_text)
