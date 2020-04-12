@@ -160,6 +160,12 @@ def main_most(args):
     print(f"    {pheno_df.shape[0]} samples")
     print(f"    {pheno_df.shape[1]} phenotypes")
 
+    # remove phenotypes with all constant values
+    tmp_pheno_mat = pheno_df.to_numpy()
+    i_col_not_const = (tmp_pheno_mat[0] != tmp_pheno_mat[1:]).any(axis=0)
+    pheno_df = pheno_df.loc[:,i_col_not_const]
+    print(f"    {pheno_df.shape[1]} non-constant phenotypes")
+
     byte_map = get_byte_map()
 
     mosttest_stat = np.empty(plink.n_snps, dtype=np.float32)
