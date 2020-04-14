@@ -98,23 +98,26 @@ def get_geno_idx(i_geno, bed, n_samples, geno_idx, ii1_tmp, ii2_tmp, byte_map):
 
 
 def run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=10000):
-    pheno_mean = np.mean(pheno_mat, axis=1, dtype=np.float64)
-    pheno_std = np.std(pheno_mat, axis=1, dtype=np.float64, ddof=0)
+    pheno_mean = np.mean(pheno_mat, axis=1, dtype=np.float32)
+    pheno_std = np.std(pheno_mat, axis=1, dtype=np.float32, ddof=0)
     n_snps = plink.n_snps
 
-    mosttest_stat = np.empty(plink.n_snps, dtype=np.float64)
-    mosttest_stat_shuf = np.empty(plink.n_snps, dtype=np.float64)
-    minp_stat = np.empty(plink.n_snps, dtype=np.float64)
-    minp_stat_shuf = np.empty(plink.n_snps, dtype=np.float64)
+    inv_C0reg = inv_C0reg.astype(np.float32)
+    pheno_mat = pheno_mat.astype(np.float32)
+
+    mosttest_stat = np.empty(plink.n_snps, dtype=np.float32)
+    mosttest_stat_shuf = np.empty(plink.n_snps, dtype=np.float32)
+    minp_stat = np.empty(plink.n_snps, dtype=np.float32)
+    minp_stat_shuf = np.empty(plink.n_snps, dtype=np.float32)
 
     for snp_chunk_start in range(0, n_snps, snp_chunk_size):
         snp_chunk_end = min(n_snps, snp_chunk_start + snp_chunk_size)
         actual_chunk_size = snp_chunk_end - snp_chunk_start
 
-        mosttest_stat_chunk = np.empty(actual_chunk_size, dtype=np.float64)
-        mosttest_stat_shuf_chunk = np.empty(actual_chunk_size, dtype=np.float64)
-        minp_stat_chunk = np.empty(actual_chunk_size, dtype=np.float64)
-        minp_stat_shuf_chunk = np.empty(actual_chunk_size, dtype=np.float64)
+        mosttest_stat_chunk = np.empty(actual_chunk_size, dtype=np.float32)
+        mosttest_stat_shuf_chunk = np.empty(actual_chunk_size, dtype=np.float32)
+        minp_stat_chunk = np.empty(actual_chunk_size, dtype=np.float32)
+        minp_stat_shuf_chunk = np.empty(actual_chunk_size, dtype=np.float32)
 
         bed_chunk = plink.bed[snp_chunk_start:snp_chunk_end]
         chunk_gwas(pheno_mat, pheno_mean, pheno_std, inv_C0reg, bed_chunk,
@@ -129,14 +132,15 @@ def run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=10000):
     return mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf
 
 
-@numba.jit(nopython=True, parallel=True, nogil=True)
+@numba.jit(nopython=True, parallel=True, nogil=True, fastmath=True)
 def chunk_gwas(pheno_mat, pheno_mean, pheno_std, inv_C0reg, bed_chunk,
                mostest_stat_chunk, mostest_stat_shuf_chunk, minp_stat_chunk, minp_stat_shuf_chunk):
     byte_map = get_byte_map()
     n_pheno, n_samples = pheno_mat.shape
     n_snps_chunk = mostest_stat_chunk.shape[0]
     for geno_i in numba.prange(n_snps_chunk):
-        t_stat = np.empty(n_pheno, dtype=np.float64) # this array can be preallocated by thread
+        #TODO: this can be improved when numba has a better control over threads (can get thread id)
+        t_stat = np.empty(n_pheno, dtype=np.float32) # this array can be preallocated by thread
         geno_idx = np.empty(3+n_samples, dtype=np.int32) # this array can be preallocated by thread
         ii1_tmp = np.empty(n_samples, dtype=np.int32) # this array can be preallocated by thread
         ii2_tmp = np.empty(n_samples, dtype=np.int32) # this array can be preallocated by thread
@@ -163,7 +167,7 @@ def chunk_gwas(pheno_mat, pheno_mean, pheno_std, inv_C0reg, bed_chunk,
         minp_stat_shuf_chunk[geno_i] = 1.0 + math.erf(x/math.sqrt(2.0)) # 2*norm.cdf(x)
     
 
-@numba.jit(nopython=True, nogil=True)
+@numba.jit(nopython=True, nogil=True, fastmath=True)
 def get_t_stat(idx2, idx1, pheno_mat, n_pheno, pheno_mean_arr, pheno_std_arr,
                geno_mean, geno_std, n_nonmiss, t_stat):
     # Fill t statistics array, t_stat[i] = ri*sqrt((n - 2)/(1 - ri*ri)),
@@ -199,8 +203,6 @@ def main_most(args):
     pheno_corr_mat = np.corrcoef(pheno_mat, rowvar=True)
     #TODO: add regularization here before inversion
     inv_C0reg = np.linalg.inv(pheno_corr_mat)
-
-    #TODO: use float32 format (can speedup sthing by a factor of ~2).
 
     print("Running correlation analysis.")
     mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf = run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=10000)
