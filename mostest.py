@@ -176,6 +176,7 @@ def get_t_stat(idx2, idx1, pheno_mat, n_pheno, pheno_mean_arr, pheno_std_arr,
         pg_t = pg_r*math.sqrt((n_nonmiss - 2.0)/(1.0 - pg_r*pg_r))
         t_stat[pheno_i] = pg_t
 
+
 def main_most(args):
     print(f"Reading {args.bfile}")
     plink = read_plink(args.bfile)
@@ -193,29 +194,16 @@ def main_most(args):
     pheno_df = pheno_df.loc[:,i_col_not_const]
     print(f"    {pheno_df.shape[1]} non-constant phenotypes")
 
-    byte_map = get_byte_map()
-
-    mosttest_stat = np.empty(plink.n_snps, dtype=np.float32)
-    mosttest_stat_shuf = np.empty(plink.n_snps, dtype=np.float32)
-    minp_stat = np.empty(plink.n_snps, dtype=np.float32)
-    minp_stat_shuf = np.empty(plink.n_snps, dtype=np.float32)
     pheno_mat = pheno_df.values.T # the code currently is designed to have phenotypes in rows and samples in columns
-
-    pheno_mean = np.mean(pheno_mat, axis=1, dtype=np.float32)
-    pheno_std = np.std(pheno_mat, axis=1, dtype=np.float32, ddof=0)
 
     pheno_corr_mat = np.corrcoef(pheno_mat, rowvar=True)
     #TODO: add regularization here before inversion
     inv_C0reg = np.linalg.inv(pheno_corr_mat)
 
-    #pheno_mat = pheno_mat.astype(np.float32)
-    #inv_C0reg = inv_C0reg.astype(np.float32)
+    #TODO: use float32 format (can speedup sthing by a factor of ~2).
 
     print("Running correlation analysis.")
     mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf = run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=10000)
-
-    #gen_corr(pheno_mat, pheno_mean, pheno_std, inv_C0reg, plink.bed, plink.n_snps, plink.n_samples,
-    #    mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf)
 
     if args.no_npz and args.no_csv:
         print("No results will be saved.")
