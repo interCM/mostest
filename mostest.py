@@ -48,7 +48,7 @@ def read_plink(bfile):
                  a1=bim.A1.values, a2=bim.A2.values, n_samples=n_samples, n_snps=n_snps, bed=bed)
 
 
-@numba.jit(nopython=True, nogil=True)
+@numba.jit(nopython=True, nogil=True, cache=True)
 def get_byte_map():
     """
     Construct mapping between bytes 0..255 and 4-element arrays of a1 genotypes
@@ -64,7 +64,7 @@ def get_byte_map():
 
 
 
-@numba.jit(nopython=True, nogil=True)
+@numba.jit(nopython=True, nogil=True, cache=True)
 def get_geno_idx(i_geno, bed, n_samples, geno_idx, ii1_tmp, ii2_tmp, byte_map):
     # Fill geno_idx array.
     # geno_idx = [n_nonmiss, n2, n1, {ii2}, {ii1}, {empty}]
@@ -132,7 +132,7 @@ def run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=10000):
     return mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf
 
 
-@numba.jit(nopython=True, parallel=True, nogil=True, fastmath=True)
+@numba.jit(nopython=True, parallel=True, nogil=True, fastmath=True, cache=True)
 def chunk_gwas(pheno_mat, pheno_mean, pheno_std, inv_C0reg, bed_chunk,
                mostest_stat_chunk, mostest_stat_shuf_chunk, minp_stat_chunk, minp_stat_shuf_chunk):
     byte_map = get_byte_map()
@@ -167,7 +167,7 @@ def chunk_gwas(pheno_mat, pheno_mean, pheno_std, inv_C0reg, bed_chunk,
         minp_stat_shuf_chunk[geno_i] = 1.0 + math.erf(x/math.sqrt(2.0)) # 2*norm.cdf(x)
     
 
-@numba.jit(nopython=True, nogil=True, fastmath=True)
+@numba.jit(nopython=True, nogil=True, fastmath=True, cache=True)
 def get_t_stat(idx2, idx1, pheno_mat, n_pheno, pheno_mean_arr, pheno_std_arr,
                geno_mean, geno_std, n_nonmiss, t_stat):
     # Fill t statistics array, t_stat[i] = ri*sqrt((n - 2)/(1 - ri*ri)),
