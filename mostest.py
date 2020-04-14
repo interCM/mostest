@@ -97,6 +97,72 @@ def get_geno_idx(i_geno, bed, n_samples, geno_idx, ii1_tmp, ii2_tmp, byte_map):
     geno_idx[3+n2:3+n2+n1] = ii1_tmp[:n1]
 
 
+def run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=10000):
+    pheno_mean = np.mean(pheno_mat, axis=1, dtype=np.float64)
+    pheno_std = np.std(pheno_mat, axis=1, dtype=np.float64, ddof=0)
+    n_snps = plink.n_snps
+
+    mosttest_stat = np.empty(plink.n_snps, dtype=np.float64)
+    mosttest_stat_shuf = np.empty(plink.n_snps, dtype=np.float64)
+    minp_stat = np.empty(plink.n_snps, dtype=np.float64)
+    minp_stat_shuf = np.empty(plink.n_snps, dtype=np.float64)
+
+    for snp_chunk_start in range(0, n_snps, snp_chunk_size):
+        snp_chunk_end = min(n_snps, snp_chunk_start + snp_chunk_size)
+        actual_chunk_size = snp_chunk_end - snp_chunk_start
+
+        mosttest_stat_chunk = np.empty(actual_chunk_size, dtype=np.float64)
+        mosttest_stat_shuf_chunk = np.empty(actual_chunk_size, dtype=np.float64)
+        minp_stat_chunk = np.empty(actual_chunk_size, dtype=np.float64)
+        minp_stat_shuf_chunk = np.empty(actual_chunk_size, dtype=np.float64)
+
+        bed_chunk = plink.bed[snp_chunk_start:snp_chunk_end]
+        chunk_gwas(pheno_mat, pheno_mean, pheno_std, inv_C0reg, bed_chunk,
+               mosttest_stat_chunk, mosttest_stat_shuf_chunk, minp_stat_chunk, minp_stat_shuf_chunk)
+
+        mosttest_stat[snp_chunk_start:snp_chunk_end] = mosttest_stat_chunk
+        mosttest_stat_shuf[snp_chunk_start:snp_chunk_end] = mosttest_stat_shuf_chunk
+        minp_stat[snp_chunk_start:snp_chunk_end] = minp_stat_chunk
+        minp_stat_shuf[snp_chunk_start:snp_chunk_end] = minp_stat_shuf_chunk
+
+        print(f"{snp_chunk_end} variants processed ({100*snp_chunk_end/n_snps:.2f}%)")
+    return mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf
+
+
+@numba.jit(nopython=True, parallel=True, nogil=True)
+def chunk_gwas(pheno_mat, pheno_mean, pheno_std, inv_C0reg, bed_chunk,
+               mostest_stat_chunk, mostest_stat_shuf_chunk, minp_stat_chunk, minp_stat_shuf_chunk):
+    byte_map = get_byte_map()
+    n_pheno, n_samples = pheno_mat.shape
+    n_snps_chunk = mostest_stat_chunk.shape[0]
+    for geno_i in numba.prange(n_snps_chunk):
+        t_stat = np.empty(n_pheno, dtype=np.float64) # this array can be preallocated by thread
+        geno_idx = np.empty(3+n_samples, dtype=np.int32) # this array can be preallocated by thread
+        ii1_tmp = np.empty(n_samples, dtype=np.int32) # this array can be preallocated by thread
+        ii2_tmp = np.empty(n_samples, dtype=np.int32) # this array can be preallocated by thread
+        get_geno_idx(geno_i, bed_chunk, n_samples, geno_idx, ii1_tmp, ii2_tmp, byte_map)
+        geno_mean = (geno_idx[1]*2 + geno_idx[2])/geno_idx[0]
+        geno_std = math.sqrt((geno_idx[1]*4 + geno_idx[2])/geno_idx[0] - geno_mean*geno_mean)
+        n_nonmiss = geno_idx[0]
+        n2 = geno_idx[1]
+        n1 = geno_idx[2]
+        # for original genotypes
+        get_t_stat(geno_idx[3:3+n2], geno_idx[3+n2:3+n2+n1], pheno_mat, n_pheno, pheno_mean, pheno_std,
+                   geno_mean, geno_std, n_nonmiss, t_stat)
+        mostest_stat_chunk[geno_i] = t_stat @ inv_C0reg @ t_stat 
+        x = -np.max(np.abs(t_stat))
+        minp_stat_chunk[geno_i] = 1.0 + math.erf(x/math.sqrt(2.0)) # 2*norm.cdf(x)
+
+        # for shuffled genotypes
+        # we need to shuffle (select randomly) only positions of 2 and 1 genotypes
+        geno_idx_shuf = np.random.choice(n_samples,n1+n2,replace=False)
+        get_t_stat(geno_idx_shuf[:n2], geno_idx_shuf[n2:], pheno_mat, n_pheno, pheno_mean, pheno_std,
+                   geno_mean, geno_std, n_nonmiss, t_stat)
+        mostest_stat_shuf_chunk[geno_i] = t_stat @ inv_C0reg @ t_stat
+        x = -np.max(np.abs(t_stat))
+        minp_stat_shuf_chunk[geno_i] = 1.0 + math.erf(x/math.sqrt(2.0)) # 2*norm.cdf(x)
+    
+
 @numba.jit(nopython=True, nogil=True)
 def get_t_stat(idx2, idx1, pheno_mat, n_pheno, pheno_mean_arr, pheno_std_arr,
                geno_mean, geno_std, n_nonmiss, t_stat):
@@ -107,47 +173,8 @@ def get_t_stat(idx2, idx1, pheno_mat, n_pheno, pheno_mean_arr, pheno_std_arr,
         p1 = pheno_mat[pheno_i][idx1].sum()
         pg_mean = (p2 + p1)/n_nonmiss
         pg_r = (pg_mean - pheno_mean_arr[pheno_i]*geno_mean)/(pheno_std_arr[pheno_i]*geno_std)
-        pg_t = pg_r*math.sqrt((n_nonmiss - 2)/(1 - pg_r*pg_r))
+        pg_t = pg_r*math.sqrt((n_nonmiss - 2.0)/(1.0 - pg_r*pg_r))
         t_stat[pheno_i] = pg_t
-        
-        
-@numba.jit(nopython=True, parallel=True, nogil=True)
-def gen_corr(pheno_mat, pheno_mean, pheno_std, inv_C0reg, bed, n_snps, n_samples,
-             mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf):
-    # Fills mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf arrays.
-    # mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf = np.empty(n_snps, dtype=np.float32)
-    # pheno_mat.shape = (n_samples, n_snps)
-    # pheno_mean, pheno_std are passed as arguments since numba does not support kwargs for these functions.
-    byte_map = get_byte_map()
-    n_pheno = pheno_mat.shape[0]
-    for geno_i in numba.prange(n_snps):
-        t_stat = np.zeros(n_pheno, dtype=np.float32) # this array can be preallocated by thread
-        t_stat_shuf = np.empty(n_pheno, dtype=np.float32) # this array can be preallocated by thread
-        geno_idx = np.empty(3+n_samples, dtype=np.int32) # this array can be preallocated by thread
-        ii1_tmp = np.empty(n_samples, dtype=np.int32) # this array can be preallocated by thread
-        ii2_tmp = np.empty(n_samples, dtype=np.int32) # this array can be preallocated by thread
-        get_geno_idx(geno_i, bed, n_samples, geno_idx, ii1_tmp, ii2_tmp, byte_map)
-        geno_mean = (geno_idx[1]*2 + geno_idx[2])/geno_idx[0]
-        geno_std = math.sqrt((geno_idx[1]*4 + geno_idx[2])/geno_idx[0] - geno_mean*geno_mean)
-        n_nonmiss = geno_idx[0]
-        n2 = geno_idx[1]
-        n1 = geno_idx[2]
-        # for original genotypes
-        get_t_stat(geno_idx[3:3+n2], geno_idx[3+n2:3+n2+n1], pheno_mat, n_pheno, pheno_mean, pheno_std,
-                   geno_mean, geno_std, n_nonmiss, t_stat)
-        mosttest_stat[geno_i] = t_stat @ inv_C0reg @ t_stat 
-        x = -np.max(np.abs(t_stat))
-        minp_stat[geno_i] = 1.0 + math.erf(x/math.sqrt(2.0)) # 2*norm.cdf(x)
-
-        # for shuffled genotypes
-        # we need to shuffle (select randomly) only positions of 2 and 1 genotypes
-        geno_idx_shuf = np.random.choice(n_samples,n1+n2,replace=False)
-        get_t_stat(geno_idx_shuf[:n2], geno_idx_shuf[n2:], pheno_mat, n_pheno, pheno_mean, pheno_std,
-                   geno_mean, geno_std, n_nonmiss, t_stat)
-        mosttest_stat_shuf[geno_i] = t_stat @ inv_C0reg @ t_stat
-        x = -np.max(np.abs(t_stat))
-        minp_stat_shuf[geno_i] = 1.0 + math.erf(x/math.sqrt(2.0)) # 2*norm.cdf(x)
-
 
 def main_most(args):
     print(f"Reading {args.bfile}")
@@ -181,12 +208,14 @@ def main_most(args):
     #TODO: add regularization here before inversion
     inv_C0reg = np.linalg.inv(pheno_corr_mat)
 
-    pheno_mat = pheno_mat.astype(np.float32)
-    inv_C0reg = inv_C0reg.astype(np.float32)
+    #pheno_mat = pheno_mat.astype(np.float32)
+    #inv_C0reg = inv_C0reg.astype(np.float32)
 
     print("Running correlation analysis.")
-    gen_corr(pheno_mat, pheno_mean, pheno_std, inv_C0reg, plink.bed, plink.n_snps, plink.n_samples,
-        mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf)
+    mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf = run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=10000)
+
+    #gen_corr(pheno_mat, pheno_mean, pheno_std, inv_C0reg, plink.bed, plink.n_snps, plink.n_samples,
+    #    mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf)
 
     if args.no_npz and args.no_csv:
         print("No results will be saved.")
