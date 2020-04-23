@@ -1,5 +1,6 @@
 // gcc -c mostlib.c -I/home/shadrin/github/gsl/install/include -O2 -pedantic-errors -Wall -Wextra -Wsign-conversion -Wconversion -Werror
 // gcc mostlib.o -o mostlib -L/home/shadrin/github/gsl/install/lib -O2 -lgsl -lgslcblas -lm
+// ./mostlib
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,11 +10,10 @@
 
 void getByteMap(signed char *byteMap)
 {
-    signed char genotypeCodes[4] = {2, -1, 1, 0};
-    int b, i;
-    for( b=0; b<256; b++ )
+    const signed char genotypeCodes[4] = {2, -1, 1, 0};
+    for( int b=0; b<256; b++ )
     {
-        for( i=0; i<4; i++ )
+        for( int i=0; i<4; i++ )
             byteMap[4*b + i] = genotypeCodes[(b >> 2*i) & 3];
     }
 }
@@ -104,13 +104,13 @@ void getTStat(int *iiHeterozygous, int *iiHomozygous, int *iiMiss, int nHeterozy
 {
     // Fill t statistics array, tStat[i] = ri*sqrt((n - 2)/(1 - ri*ri)),
     // where ri is correlation between genotype vector and i-th phenotype vector.
-    int iPheno, i;
+    int i;
     float *phenoVec;
     float sumHetPheno, sumHomPheno, sumMissPheno, sumMissPheno2, phenoMean, phenoStd, corr;
     float tmp_f;
     float nNonmiss_f = (float)nNonmiss;
 
-    for( iPheno=0; iPheno<nPheno; iPheno++ )
+    for( int iPheno=0; iPheno<nPheno; iPheno++ )
     {
         phenoVec = phenoMat[iPheno];
         sumMissPheno = 0.0;
