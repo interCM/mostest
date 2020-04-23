@@ -1,7 +1,10 @@
-// gcc mostlib.c -o mostlib -O3 -lm -pedantic-errors -Wall -Wextra -Wsign-conversion -Wconversion -Werror
+// gcc -c mostlib.c -I/home/shadrin/github/gsl/install/include -O2 -pedantic-errors -Wall -Wextra -Wsign-conversion -Wconversion -Werror
+// gcc mostlib.o -o mostlib -L/home/shadrin/github/gsl/install/lib -O2 -lgsl -lgslcblas -lm
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <gsl/gsl_rng.h>
 
 
 void getByteMap(signed char *byteMap)
@@ -133,6 +136,21 @@ void getTStat(int *iiHeterozygous, int *iiHomozygous, int *iiMiss, int nHeterozy
 }
 
 
+void partialPermutation(int *vector, int size, int n2perm, gsl_rng *r)
+{
+    // Permute n2perm first elements of the vector inplace
+    long unsigned int upper_rand = (long unsigned int)size;
+    int ind2swap, tmp_i;
+    for( int i=0; i<n2perm; i++ )
+    {
+        ind2swap = (int)gsl_rng_uniform_int(r, upper_rand--) + i;
+        tmp_i = vector[ind2swap];
+        vector[ind2swap] = vector[i];
+        vector[i] = tmp_i;
+    }
+}
+
+
 void corrPhenoGeno(int nSnps, int nSamples, int nPheno, float **phenoMat,
     float *sumPheno, float *sumPheno2, float **invCovMat, unsigned char **bed,
     float *mostestStat, float *mostestStatPerm, float *minpStat, float *minpStatPerm)
@@ -141,7 +159,7 @@ void corrPhenoGeno(int nSnps, int nSamples, int nPheno, float **phenoMat,
     // invCovMat = [nPheno x nPheno] matrix.
     // bed = [nSnps x N] matrix, chunk of plink bed file, N = nSamples/4 (rounded up)
     // mostestStat, mostestStatPerm, minpStat, minpStatPerm = [nSnps] arrays to fill
-    int iSnp;
+    int i;
     const float SQRT2 = 1.4142135623730951f; // sqrt(2)
     signed char *byteMap = (signed char *)malloc(256*4*sizeof(signed char));
     getByteMap(byteMap);
@@ -153,8 +171,14 @@ void corrPhenoGeno(int nSnps, int nSamples, int nPheno, float **phenoMat,
     int nHeterozygous, nHomozygous, nMiss, nNonmiss;
     float genoMean, genoStd;
 
+    int *sampleIndices = (int *)malloc((size_t)nSamples*sizeof(int));
+    for( i=0; i<nSamples; i++ )
+        sampleIndices[i] = i;
+    gsl_rng *r = gsl_rng_alloc(gsl_rng_taus);
+    gsl_rng_set(r, 1); // set random seed
+
     // parallelize the following loop with OMP
-    for( iSnp=0; iSnp<nSnps; iSnp++ )
+    for( int iSnp=0; iSnp<nSnps; iSnp++ )
     {
         getHetHomMissInd(bed[iSnp], nSamples, iiHeterozygous, iiHomozygous, iiMiss,
             &nHeterozygous, &nHomozygous, &nMiss, byteMap);
@@ -169,16 +193,22 @@ void corrPhenoGeno(int nSnps, int nSamples, int nPheno, float **phenoMat,
         minpStat[iSnp] = 1.0f + erff(getMinNegAbs(tStat, nPheno)/SQRT2); // 2*norm.cdf(x)
 
         // for shuffled genotypes
-        // we need to shuffle (select randomly) only positions of 2, 1 and missing genotypes
-        mostestStatPerm[iSnp] = 0.0;
-        minpStatPerm[iSnp] = 0.0;
+        // we need to permute (select randomly) only positions of 2, 1 and missing genotypes
+        partialPermutation(sampleIndices, nSamples, nHeterozygous+nHomozygous+nMiss, r);
+        getTStat(sampleIndices, &sampleIndices[nHeterozygous], &sampleIndices[nHeterozygous+nHomozygous],
+            nHeterozygous, nHomozygous, nMiss, nNonmiss, phenoMat, nPheno, sumPheno, sumPheno2,
+            genoMean, genoStd, tStat);
+        mostestStatPerm[iSnp] = quadraticNorm(tStat, invCovMat, nPheno);
+        minpStatPerm[iSnp] = 1.0f + erff(getMinNegAbs(tStat, nPheno)/SQRT2);
     }
 
-    free(byteMap);
-    free(tStat);
-    free(iiHeterozygous);
-    free(iiHomozygous);
+    free(r);
+    free(sampleIndices);
     free(iiMiss);
+    free(iiHomozygous);
+    free(iiHeterozygous);
+    free(tStat);
+    free(byteMap);
 }
 
 
@@ -308,6 +338,11 @@ void test()
     for( i=0; i<nSnps; i++ )
     {
         printf("%f  ", mostestStatPerm[i]);
+    }
+    printf("\n");
+    for( i=0; i<nSnps; i++ )
+    {
+        printf("%f  ", minpStatPerm[i]);
     }
     printf("\n");
 
