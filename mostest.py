@@ -39,7 +39,7 @@ _corrPhenoGeno.restype = None
 
 def makeContiguous(arr):
     if not arr.flags['C_CONTIGUOUS']:
-        arr = np.ascontiguousarray(arr, dtype= arr.dtype)
+        arr = np.ascontiguousarray(arr, dtype=arr.dtype)
     return arr
 
 def corrPhenoGeno(phenoMat, invCovMat, bed, nThreads=None):
@@ -47,7 +47,7 @@ def corrPhenoGeno(phenoMat, invCovMat, bed, nThreads=None):
         nThreads = multiprocessing.cpu_count()
     
     phenoMat = makeContiguous(phenoMat).astype(np.float32)
-    invCovMatPP = makeContiguous(invCovMat).astype(np.float32)
+    invCovMat = makeContiguous(invCovMat).astype(np.float32)
     bed = makeContiguous(bed)
 
     nSnps = bed.shape[0]
@@ -64,13 +64,6 @@ def corrPhenoGeno(phenoMat, invCovMat, bed, nThreads=None):
     phenoMat_pp = (phenoMat.ctypes.data + np.arange(phenoMat.shape[0])*phenoMat.strides[0]).astype(np.uintp)
     invCovMat_pp = (invCovMat.ctypes.data + np.arange(invCovMat.shape[0])*invCovMat.strides[0]).astype(np.uintp)
     bed_pp = (bed.ctypes.data + np.arange(bed.shape[0])*bed.strides[0]).astype(np.uintp) 
-    
-    sumPheno_p = sumPheno.ctypes.data_as(_floatP)
-    sumPheno2_p = sumPheno2.ctypes.data_as(_floatP)
-    mostestStat_p = mostestStat.ctypes.data_as(_floatP)
-    mostestStatPerm_p = mostestStatPerm.ctypes.data_as(_floatP)
-    minpStat_p = minpStat.ctypes.data_as(_floatP)
-    minpStatPerm_p = minpStatPerm.ctypes.data_as(_floatP)
 
     _corrPhenoGeno(nSnps, nSamples, nPheno, phenoMat_pp, sumPheno, sumPheno2,
          invCovMat_pp, bed_pp, nThreads, mostestStat, mostestStatPerm, minpStat, minpStatPerm)
