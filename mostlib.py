@@ -1,5 +1,7 @@
 import ctypes
 import numpy as np
+import pandas as pd
+from scipy.stats import pearsonr
 
 _mostlib = np.ctypeslib.load_library("mostlib.so", "./")
 
@@ -49,12 +51,65 @@ def corrPhenoGeno(phenoMat, invCovMat, bed):
     return mostestStat, mostestStatPerm, minpStat, minpStatPerm
 
 if __name__ == "__main__":
-    bed = np.array([[3, 137],[198, 42],[237, 9]], dtype=np.uint8)
-    phenoMat = np.array([[1.21, 0.41, 0.87, 1.02, 0.74, 1.11, 0.65], [1.14, 0.62, 0.91, 1.00, 0.68, 1.07, 0.87]], dtype=np.float32)
-    invCovMat = np.array([[7.04376822, -6.52463811], [-6.52463811,  7.04376822]], dtype=np.float32)
 
-    mostestStat, mostestStatPerm, minpStat, minpStatPerm = corrPhenoGeno(phenoMat, invCovMat, bed)
-    print(mostestStat)
-    print(minpStat)
-    print(mostestStatPerm)
-    print(minpStatPerm)
+    if False:
+        bed = np.array([[3, 137],[198, 42],[237, 9]], dtype=np.uint8)
+        phenoMat = np.array([[1.21, 0.41, 0.87, 1.02, 0.74, 1.11, 0.65], [1.14, 0.62, 0.91, 1.00, 0.68, 1.07, 0.87]], dtype=np.float32)
+        invCovMat = np.array([[7.04376822, -6.52463811], [-6.52463811,  7.04376822]], dtype=np.float32)
+
+        mostestStat, mostestStatPerm, minpStat, minpStatPerm = corrPhenoGeno(phenoMat, invCovMat, bed)
+        print(mostestStat)
+        print(minpStat)
+        print(mostestStatPerm)
+        print(minpStatPerm)
+
+    if True:
+        N2run = 200000
+        bed_file = "chr21.bed"
+        pheno_file = "pheno.txt"
+        n_snps = 149454
+        n_samples = 10000
+        n_cols = n_samples//4
+        if 4*n_cols != n_samples:
+            n_cols += 1
+
+        bed = np.memmap(bed_file, dtype=np.uint8, offset=3, mode='r', shape=(n_snps,n_cols))
+        pheno_df = pd.read_csv(pheno_file, sep='\t')
+        phenoMat = pheno_df.values.T # the code currently is designed to have phenotypes in rows and samples in columns
+
+        phenoCorrMat = np.corrcoef(phenoMat, rowvar=True)
+        invCovMat = np.linalg.inv(phenoCorrMat)
+
+        phenoMat = phenoMat.astype(np.float32)
+        invCovMat = invCovMat.astype(np.float32)
+
+        mostestStat, mostestStatPerm, minpStat, minpStatPerm = corrPhenoGeno(phenoMat, invCovMat, bed[:N2run])
+
+        # compare with test
+        conpare_df = pd.read_csv("test.csv", sep='\t', nrows=N2run)
+        mostest_r, mostest_p = pearsonr(conpare_df.most_orig, mostestStat)
+        mostest_max_dist = np.max(np.abs(conpare_df.most_orig - mostestStat))
+        minp_r, minp_p = pearsonr(conpare_df.minp_orig, minpStat)
+        minp_max_dist = np.max(np.abs(conpare_df.minp_orig - minpStat))
+
+        most_perm_mean = mostestStatPerm.mean()
+        most_perm_mean_ref = conpare_df.most_perm.mean()
+        minp_perm_mean = minpStatPerm.mean()
+        minp_perm_mean_ref = conpare_df.minp_perm.mean()
+        most_perm_std = mostestStatPerm.std()
+        most_perm_std_ref = conpare_df.most_perm.std()
+        minp_perm_std = minpStatPerm.std()
+        minp_perm_std_ref = conpare_df.minp_perm.std()
+
+        print(f"N = {N2run}")
+        print("Orig:")
+        print(f"r(most) = {mostest_r:.6f}, p = {mostest_p}")
+        print(f"maxDist(most) = {mostest_max_dist:.6f}")
+        print(f"r(minp) = {minp_r:.6f}, p = {minp_p}")
+        print(f"maxDist(minp) = {minp_max_dist:.6f}")
+        print("Perm:")
+        print(f"most cur: mean = {most_perm_mean:.3f}, std = {most_perm_std:.3f}")
+        print(f"most ref: mean = {most_perm_mean_ref:.3f}, std = {most_perm_std_ref:.3f}")
+        print(f"minp cur: mean = {minp_perm_mean:.3f}, std = {minp_perm_std:.3f}")
+        print(f"minp ref: mean = {minp_perm_mean_ref:.3f}, std = {minp_perm_std_ref:.3f}")
+
