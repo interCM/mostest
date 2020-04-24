@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Ofast -fPIC -pedantic-errors -Wall -Wextra -Wsign-conversion -Wconversion -Werror -std=c99 -fopenmp
+CFLAGS = -O2 -fPIC -pedantic-errors -Wall -Wextra -Wsign-conversion -Wconversion -Werror -std=c99 -fopenmp
 LIBS = -lgsl -lgslcblas -lm
 GSL = /mnt/seagate10/projects/github/gsl/install
 

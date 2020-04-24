@@ -162,10 +162,9 @@ void corrPhenoGeno(int nSnps, int nSamples, int nPheno, float **phenoMat,
     // mostestStat, mostestStatPerm, minpStat, minpStatPerm = [nSnps] arrays to fill
 
     // Configure OMP
-    int max_threads = 4;
     // https://stackoverflow.com/questions/11095309/openmp-set-num-threads-is-not-working
     omp_set_dynamic(0);     // Explicitly disable dynamic teams
-    omp_set_num_threads(max_threads); // Use 4 threads for all consecutive parallel regions
+    omp_set_num_threads(nThreads); 
     printf("Max number of threads = %i\n", nThreads);
 
     int i, tid;
