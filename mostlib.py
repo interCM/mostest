@@ -6,7 +6,7 @@ from scipy.stats import pearsonr
 
 _mostlib = np.ctypeslib.load_library("mostlib.so", "./")
 
-_floatP = ctypes.POINTER(ctypes.c_float)
+_floatP = np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags='C')
 _genericPP = np.ctypeslib.ndpointer(dtype=np.uintp, ndim=1, flags='C') # https://stackoverflow.com/questions/22425921/pass-a-2d-numpy-array-to-c-using-ctypes
 _corrPhenoGeno = _mostlib.corrPhenoGeno
 _corrPhenoGeno.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, _genericPP,
@@ -34,9 +34,10 @@ def corrPhenoGeno(phenoMat, invCovMat, bed, nThreads=None):
     invCovMatPP = makeContiguous(invCovMat)
     bed = makeContiguous(bed)
 
-    nSnps = ctypes.c_int(nSnps)
-    nSamples = ctypes.c_int(phenoMat.shape[1])
-    nPheno = ctypes.c_int(phenoMat.shape[0])
+    nSnps = nSnps
+    nSamples = phenoMat.shape[1]
+    nPheno = phenoMat.shape[0]
+    #TODO: replace 2D **arrays in mostest.c with 1D *arrays and updated the following declarations
     phenoMat_pp = (phenoMat.ctypes.data + np.arange(phenoMat.shape[0])*phenoMat.strides[0]).astype(np.uintp)
     invCovMat_pp = (invCovMat.ctypes.data + np.arange(invCovMat.shape[0])*invCovMat.strides[0]).astype(np.uintp)
     bed_pp = (bed.ctypes.data + np.arange(bed.shape[0])*bed.strides[0]).astype(np.uintp) 
@@ -48,10 +49,8 @@ def corrPhenoGeno(phenoMat, invCovMat, bed, nThreads=None):
     minpStat_p = minpStat.ctypes.data_as(_floatP)
     minpStatPerm_p = minpStatPerm.ctypes.data_as(_floatP)
 
-    nThreads = ctypes.c_int(nThreads)
-
-    _corrPhenoGeno(nSnps, nSamples, nPheno, phenoMat_pp, sumPheno_p, sumPheno2_p,
-        invCovMat_pp, bed_pp, nThreads, mostestStat_p, mostestStatPerm_p, minpStat_p, minpStatPerm_p)
+    _corrPhenoGeno(nSnps, nSamples, nPheno, phenoMat_pp, sumPheno, sumPheno2,
+         invCovMat_pp, bed_pp, nThreads, mostestStat, mostestStatPerm, minpStat, minpStatPerm)
 
     return mostestStat, mostestStatPerm, minpStat, minpStatPerm
 
