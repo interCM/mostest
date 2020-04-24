@@ -1,5 +1,6 @@
 import ctypes
 import numpy as np
+import multiprocessing
 import pandas as pd
 from scipy.stats import pearsonr
 
@@ -9,7 +10,7 @@ _floatP = ctypes.POINTER(ctypes.c_float)
 _genericPP = np.ctypeslib.ndpointer(dtype=np.uintp, ndim=1, flags='C') # https://stackoverflow.com/questions/22425921/pass-a-2d-numpy-array-to-c-using-ctypes
 _corrPhenoGeno = _mostlib.corrPhenoGeno
 _corrPhenoGeno.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, _genericPP,
-    _floatP, _floatP, _genericPP, _genericPP, _floatP, _floatP, _floatP, _floatP] 
+    _floatP, _floatP, _genericPP, _genericPP, ctypes.c_int, _floatP, _floatP, _floatP, _floatP] 
 _corrPhenoGeno.restype = None 
 
 def makeContiguous(arr):
@@ -17,7 +18,9 @@ def makeContiguous(arr):
         arr = np.ascontiguousarray(arr, dtype= arr.dtype)
     return arr
 
-def corrPhenoGeno(phenoMat, invCovMat, bed):
+def corrPhenoGeno(phenoMat, invCovMat, bed, nThreads=None):
+    if nThreads is None:
+        nThreads = multiprocessing.cpu_count()
     
     nSnps = bed.shape[0]
     sumPheno = phenoMat.sum(axis=1)
@@ -45,8 +48,10 @@ def corrPhenoGeno(phenoMat, invCovMat, bed):
     minpStat_p = minpStat.ctypes.data_as(_floatP)
     minpStatPerm_p = minpStatPerm.ctypes.data_as(_floatP)
 
+    nThreads = ctypes.c_int(nThreads)
+
     _corrPhenoGeno(nSnps, nSamples, nPheno, phenoMat_pp, sumPheno_p, sumPheno2_p,
-        invCovMat_pp, bed_pp, mostestStat_p, mostestStatPerm_p, minpStat_p, minpStatPerm_p)
+        invCovMat_pp, bed_pp, nThreads, mostestStat_p, mostestStatPerm_p, minpStat_p, minpStatPerm_p)
 
     return mostestStat, mostestStatPerm, minpStat, minpStatPerm
 

@@ -1,11 +1,12 @@
-// gcc -c mostlib.c -I/home/shadrin/github/gsl/install/include -O2 -pedantic-errors -Wall -Wextra -Wsign-conversion -Wconversion -Werror
-// gcc mostlib.o -o mostlib -L/home/shadrin/github/gsl/install/lib -O2 -lgsl -lgslcblas -lm
+// gcc -c mostlib.c -I/home/shadrin/github/gsl/install/include -O2 -fopenmp -pedantic-errors -Wall -Wextra -Wsign-conversion -Wconversion -Werror
+// gcc mostlib.o -o mostlib -L/home/shadrin/github/gsl/install/lib -O2 -pedantic-errors -Wall -Wextra -Wsign-conversion -Wconversion -Werror -fopenmp -lgsl -lgslcblas -lm
 // ./mostlib
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <gsl/gsl_rng.h>
+#include <omp.h>
 
 
 void getByteMap(signed char *byteMap)
@@ -152,62 +153,85 @@ void partialPermutation(int *vector, int size, int n2perm, gsl_rng *r)
 
 
 void corrPhenoGeno(int nSnps, int nSamples, int nPheno, float **phenoMat,
-    float *sumPheno, float *sumPheno2, float **invCovMat, unsigned char **bed,
+    float *sumPheno, float *sumPheno2, float **invCovMat, unsigned char **bed, int nThreads,
     float *mostestStat, float *mostestStatPerm, float *minpStat, float *minpStatPerm)
 {
     // phenoMat = [nPheno x nSamples] matrix.
     // invCovMat = [nPheno x nPheno] matrix.
     // bed = [nSnps x N] matrix, chunk of plink bed file, N = nSamples/4 (rounded up)
     // mostestStat, mostestStatPerm, minpStat, minpStatPerm = [nSnps] arrays to fill
-    int i;
+
+    // Configure OMP
+    int max_threads = 4;
+    // https://stackoverflow.com/questions/11095309/openmp-set-num-threads-is-not-working
+    omp_set_dynamic(0);     // Explicitly disable dynamic teams
+    omp_set_num_threads(max_threads); // Use 4 threads for all consecutive parallel regions
+    printf("Max number of threads = %i\n", nThreads);
+
+    int i, tid;
     const float SQRT2 = 1.4142135623730951f; // sqrt(2)
     signed char *byteMap = (signed char *)malloc(256*4*sizeof(signed char));
     getByteMap(byteMap);
 
-    float *tStat = (float *)malloc((size_t)nPheno*sizeof(float));
-    int *iiHeterozygous = (int *)malloc((size_t)nSamples*sizeof(int)); // indices of 2
-    int *iiHomozygous = (int *)malloc((size_t)nSamples*sizeof(int));   // indices of 1
-    int *iiMiss = (int *)malloc((size_t)nSamples*sizeof(int));   // indices of missing values
+    float *tStat[nThreads];
+    int *iiHeterozygous[nThreads];
+    int *iiHomozygous[nThreads];
+    int *iiMiss[nThreads];
+    int *sampleIndices[nThreads];
     int nHeterozygous, nHomozygous, nMiss, nNonmiss;
     float genoMean, genoStd;
+    gsl_rng *rng[nThreads];
 
-    int *sampleIndices = (int *)malloc((size_t)nSamples*sizeof(int));
-    for( i=0; i<nSamples; i++ )
-        sampleIndices[i] = i;
-    gsl_rng *r = gsl_rng_alloc(gsl_rng_taus);
-    gsl_rng_set(r, 1); // set random seed
+    for( i=0; i<nThreads; i++ )
+    {
+        tStat[i] = (float *)malloc((size_t)nPheno*sizeof(float));
+        iiHeterozygous[i] = (int *)malloc((size_t)nSamples*sizeof(int)); // indices of 2
+        iiHomozygous[i] = (int *)malloc((size_t)nSamples*sizeof(int));   // indices of 1
+        iiMiss[i] = (int *)malloc((size_t)nSamples*sizeof(int));   // indices of missing values
+        sampleIndices[i] = (int *)malloc((size_t)nSamples*sizeof(int));
+        for( int j=0; j<nSamples; j++ )
+                sampleIndices[i][j] = j;
+        rng[i] = gsl_rng_alloc(gsl_rng_taus);
+        // 0 seed sets to default seed, which is the same as 1 for gsl_rng_taus, so should start seeding with 1 with multithreading
+        gsl_rng_set(rng[i], (long unsigned int)i+1);
+    }
 
     // parallelize the following loop with OMP
+    #pragma omp parallel for default(shared) private(nHeterozygous, nHomozygous, nMiss, nNonmiss, genoMean, genoStd, tid) schedule(dynamic)
     for( int iSnp=0; iSnp<nSnps; iSnp++ )
     {
-        getHetHomMissInd(bed[iSnp], nSamples, iiHeterozygous, iiHomozygous, iiMiss,
+        tid = omp_get_thread_num();
+        getHetHomMissInd(bed[iSnp], nSamples, iiHeterozygous[tid], iiHomozygous[tid], iiMiss[tid],
             &nHeterozygous, &nHomozygous, &nMiss, byteMap);
         nNonmiss = nSamples - nMiss;
         genoMean = (float)(2*nHeterozygous + nHomozygous)/(float)nNonmiss;
         genoStd = sqrtf((float)(4*nHeterozygous + nHomozygous)/(float)nNonmiss - genoMean*genoMean);
 
         // for original genotypes
-        getTStat(iiHeterozygous, iiHomozygous, iiMiss, nHeterozygous, nHomozygous, nMiss,
-            nNonmiss, phenoMat, nPheno, sumPheno, sumPheno2, genoMean, genoStd, tStat);
-        mostestStat[iSnp] = quadraticNorm(tStat, invCovMat, nPheno);
-        minpStat[iSnp] = 1.0f + erff(getMinNegAbs(tStat, nPheno)/SQRT2); // 2*norm.cdf(x)
+        getTStat(iiHeterozygous[tid], iiHomozygous[tid], iiMiss[tid], nHeterozygous, nHomozygous, nMiss,
+            nNonmiss, phenoMat, nPheno, sumPheno, sumPheno2, genoMean, genoStd, tStat[tid]);
+        mostestStat[iSnp] = quadraticNorm(tStat[tid], invCovMat, nPheno);
+        minpStat[iSnp] = 1.0f + erff(getMinNegAbs(tStat[tid], nPheno)/SQRT2); // 2*norm.cdf(x)
 
         // for shuffled genotypes
         // we need to permute (select randomly) only positions of 2, 1 and missing genotypes
-        partialPermutation(sampleIndices, nSamples, nHeterozygous+nHomozygous+nMiss, r);
-        getTStat(sampleIndices, &sampleIndices[nHeterozygous], &sampleIndices[nHeterozygous+nHomozygous],
+        partialPermutation(sampleIndices[tid], nSamples, nHeterozygous+nHomozygous+nMiss, rng[tid]);
+        getTStat(sampleIndices[tid], &sampleIndices[tid][nHeterozygous], &sampleIndices[tid][nHeterozygous+nHomozygous],
             nHeterozygous, nHomozygous, nMiss, nNonmiss, phenoMat, nPheno, sumPheno, sumPheno2,
-            genoMean, genoStd, tStat);
-        mostestStatPerm[iSnp] = quadraticNorm(tStat, invCovMat, nPheno);
-        minpStatPerm[iSnp] = 1.0f + erff(getMinNegAbs(tStat, nPheno)/SQRT2);
+            genoMean, genoStd, tStat[tid]);
+        mostestStatPerm[iSnp] = quadraticNorm(tStat[tid], invCovMat, nPheno);
+        minpStatPerm[iSnp] = 1.0f + erff(getMinNegAbs(tStat[tid], nPheno)/SQRT2);
     }
 
-    free(r);
-    free(sampleIndices);
-    free(iiMiss);
-    free(iiHomozygous);
-    free(iiHeterozygous);
-    free(tStat);
+    for( i=0; i<nThreads; i++ )
+    {
+        free(rng[i]);
+        free(sampleIndices[i]);
+        free(iiMiss[i]);
+        free(iiHomozygous[i]);
+        free(iiHeterozygous[i]);
+        free(tStat[i]);
+    }
     free(byteMap);
 }
 
@@ -317,12 +341,14 @@ void test()
         for( j=0; j<nByte; j++ )
             bed[i][j] = bedArr[i][j];
     }
+
+    int nThreads = (int)omp_get_max_threads();
     
     float *mostestStat = (float *)malloc((size_t)nSnps*sizeof(float));
     float *mostestStatPerm = (float *)malloc((size_t)nSnps*sizeof(float));
     float *minpStat = (float *)malloc((size_t)nSnps*sizeof(float));
     float *minpStatPerm = (float *)malloc((size_t)nSnps*sizeof(float));
-    corrPhenoGeno(nSnps, nSamples, nPheno, phenoMat, sumPheno, sumPheno2, invCovMat, bed,
+    corrPhenoGeno(nSnps, nSamples, nPheno, phenoMat, sumPheno, sumPheno2, invCovMat, bed, nThreads,
         mostestStat, mostestStatPerm, minpStat, minpStatPerm);
 
     for( i=0; i<nSnps; i++ )
