@@ -165,7 +165,7 @@ void corrPhenoGeno(int nSnps, int nSamples, int nPheno, float **phenoMat,
     // https://stackoverflow.com/questions/11095309/openmp-set-num-threads-is-not-working
     omp_set_dynamic(0);     // Explicitly disable dynamic teams
     omp_set_num_threads(nThreads); 
-    printf("Max number of threads = %i\n", nThreads);
+    // printf("Max number of threads = %i\n", nThreads);
 
     int i, tid;
     const float SQRT2 = 1.4142135623730951f; // sqrt(2)
