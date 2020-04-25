@@ -141,6 +141,8 @@ def main_most(args):
 
     pheno_mat = pheno_df.values.T # the code currently is designed to have phenotypes in rows and samples in columns
 
+    #TODO: perform rank-based inverse normal transform
+
     pheno_corr_mat = np.corrcoef(pheno_mat, rowvar=True)
     #TODO: check whether args.num_eigval_to_regularize is less than the number of Phenotypes
     print(f"Regularizing {args.num_eigval_to_regularize} eigen values.")
@@ -154,11 +156,15 @@ def main_most(args):
     inv_C0reg = np.linalg.inv(pheno_corr_mat_reg)
 
     print("Running correlation analysis.")
-    mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf = run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=50000)
+    most_orig, most_perm, minp_orig, minp_perm = run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=50000)
+
+    #TODO: in npz and mat formats save pheno_corr_mat_reg (=C0) matrix
+    #TODO: save nvec (required for process_results.py)
+    #TODO: also save as much as possible of other parameters saved by the original mostest_light.m
 
     if not args.no_csv:
-        out_df = pd.DataFrame({"most_orig":mosttest_stat, "minp_orig":minp_stat,
-            "most_perm":mosttest_stat_shuf, "minp_perm":minp_stat_shuf})
+        out_df = pd.DataFrame({"most_orig":most_orig, "minp_orig":minp_orig,
+            "most_perm":most_perm, "minp_perm":minp_perm})
         if not args.out.endswith(".csv"):
             fname = f"{args.out}.csv"
         out_df.to_csv(fname, index=False, sep='\t')
@@ -166,15 +172,15 @@ def main_most(args):
     if args.save_npz:
         if not args.out.endswith(".npz"):
             fname = f"{args.out}.npz"
-        np.savez_compressed(fname, most_orig=mosttest_stat, minp_orig=minp_stat,
-            most_perm=mosttest_stat_shuf, minp_perm=minp_stat_shuf)
+        np.savez_compressed(fname, most_orig=most_orig, minp_orig=minp_orig,
+            most_perm=most_perm, minp_perm=minp_perm)
         print(f"Results saved to {fname}")
     if args.save_mat:
         if not args.out.endswith(".mat"):
             fname = f"{args.out}.mat"
-        mdict = {"most_orig":mosttest_stat, "minp_orig":minp_stat,
-            "most_perm":mosttest_stat_shuf, "minp_perm":minp_stat_shuf}
-        savemat(fname, mdict)
+        mostvecs = np.vstack((most_orig, most_perm))
+        minpvecs = np.vstack((minp_orig, minp_perm))
+        savemat(fname, {"mostvecs":mostvecs, "minpvecs":minpvecs})
         print(f"Results saved to {fname}")
 
 
