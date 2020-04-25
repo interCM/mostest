@@ -5,6 +5,7 @@ from collections import namedtuple
 import argparse
 import ctypes
 import multiprocessing
+from scipy.io import savemat
 
 # Arg parsing
 example_text =  """Example:
@@ -19,8 +20,9 @@ def parse_args(args):
     parser.add_argument("--out", required=True, help="Output file prefix.")
     parser.add_argument("--num-eigval-to-regularize", type=int, default=0,
         help="Number of smallest eigen values to regularize.")
-    parser.add_argument("--no-npz", action="store_true", help="Do not save npz.")
     parser.add_argument("--no-csv", action="store_true", help="Do not save csv.")
+    parser.add_argument("--save-npz", action="store_true", help="Save as npz.")
+    parser.add_argument("--save-mat", action="store_true", help="Save as mat.")
 
     return parser.parse_args(args)
 # End Arg parsing
@@ -154,23 +156,25 @@ def main_most(args):
     print("Running correlation analysis.")
     mosttest_stat, mosttest_stat_shuf, minp_stat, minp_stat_shuf = run_gwas(pheno_mat, plink, inv_C0reg, snp_chunk_size=50000)
 
-    if args.no_npz and args.no_csv:
-        print("No results will be saved.")
-    else:
-        print("Saving results.")
-
-    if not args.no_npz:
-        if not args.out.endswith(".npz"):
-            fname = f"{args.out}.npz"
-        np.savez_compressed(fname, most_orig=mosttest_stat, minp_orig=minp_stat,
-            most_perm=mosttest_stat_shuf, minp_perm=minp_stat_shuf)
-        print(f"Results saved to {fname}")
     if not args.no_csv:
         out_df = pd.DataFrame({"most_orig":mosttest_stat, "minp_orig":minp_stat,
             "most_perm":mosttest_stat_shuf, "minp_perm":minp_stat_shuf})
         if not args.out.endswith(".csv"):
             fname = f"{args.out}.csv"
         out_df.to_csv(fname, index=False, sep='\t')
+        print(f"Results saved to {fname}")
+    if args.save_npz:
+        if not args.out.endswith(".npz"):
+            fname = f"{args.out}.npz"
+        np.savez_compressed(fname, most_orig=mosttest_stat, minp_orig=minp_stat,
+            most_perm=mosttest_stat_shuf, minp_perm=minp_stat_shuf)
+        print(f"Results saved to {fname}")
+    if args.save_mat:
+        if not args.out.endswith(".mat"):
+            fname = f"{args.out}.mat"
+        mdict = {"most_orig":mosttest_stat, "minp_orig":minp_stat,
+            "most_perm":mosttest_stat_shuf, "minp_perm":minp_stat_shuf}
+        savemat(fname, mdict)
         print(f"Results saved to {fname}")
 
 
